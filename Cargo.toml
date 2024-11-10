@@ -1,0 +1,8 @@
+[package]
+name = "run_checks"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dialoguer = "0.11.0"
+owo-colors = "4.1.0"
