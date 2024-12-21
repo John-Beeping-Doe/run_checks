@@ -6,7 +6,7 @@ The `run_checks` project is a Rust CLI tool designed to streamline and automate 
 
 ## Features
 
-- **Code Formatting**: Uses `rustfmt` to format all Rust files.
+- **Code Formatting**: Uses `rustfmt` to format all Rust files...
 - **Linting**: Runs `clippy` with strict checks to ensure code quality.
 - **Type Checking**: Validates types and syntax using `cargo check`.
 - **Testing**: Executes unit tests with `cargo test` to verify code functionality.
