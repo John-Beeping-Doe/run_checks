@@ -4,6 +4,7 @@
 use aho_corasick::AhoCorasickBuilder;
 use comfy_table::{presets::UTF8_FULL, Attribute, Cell, CellAlignment, Color, Row, Table};
 use futures::future::join_all;
+use regex::Regex;
 use std::{collections::BTreeSet, env, fs, path::Path, time::Instant};
 use tokio::process::Command;
 use walkdir::WalkDir;
@@ -200,6 +201,29 @@ fn build_privacy_security_table() -> Table {
         ]);
     }
 
+    // Final combined row for extra scans (secrets, PEMs, leak-files, docs/examples/tests PII).
+    let (extra_found, extra_details, extra_locs) = run_extra_scans();
+    let status = if extra_found {
+        Cell::new("Found").add_attribute(Attribute::Bold).fg(Color::Red)
+    } else {
+        Cell::new("Not found").add_attribute(Attribute::Bold).fg(Color::Green)
+    };
+    let locs = if extra_locs.is_empty() {
+        String::new()
+    } else if extra_locs.len() <= 5 {
+        extra_locs.join(" | ")
+    } else {
+        let shown = extra_locs[..5].join(" | ");
+        format!("{shown} | +{} more files", extra_locs.len() - 5)
+    };
+    t.add_row(vec![
+        Cell::new("Extra scans"),
+        Cell::new("secrets, PEM, leak-files, docs/examples/tests"),
+        status,
+        Cell::new(extra_details),
+        Cell::new(locs),
+    ]);
+
     t
 }
 
@@ -314,7 +338,6 @@ fn collect_project_text_files() -> Vec<(String, String)> {
         .filter_entry(|e| {
             let p = e.path();
             let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
-            // Simplified per clippy::nonminimal-bool
             !(name == ".git" || name == "target" || name == "node_modules" || p.is_symlink())
         })
         .filter_map(Result::ok)
@@ -333,4 +356,127 @@ fn collect_project_text_files() -> Vec<(String, String)> {
         }
     }
     files
+}
+
+/// Extra scans summarized into one row.
+/// - Secret-like words and common token formats
+/// - PEM/SSH key blocks
+/// - Presence of common leak-prone files
+/// - PII in docs/examples/tests
+fn run_extra_scans() -> (bool, String, Vec<String>) {
+    // Patterns equivalent to the rg examples
+    let re_words =
+        Regex::new(r"(?i)\b(api|secret|token|key|password|passwd|bearer|authorization)\b").unwrap();
+    let re_aws = Regex::new(r"AKIA[0-9A-Z]{16}").unwrap();
+    let re_gh = Regex::new(r"ghp_[A-Za-z0-9]{36,}").unwrap();
+    let re_slack = Regex::new(r"xox[baprs]-[A-Za-z0-9-]{10,}").unwrap();
+    let re_pem = Regex::new(r"BEGIN (RSA|DSA|EC|OPENSSH) (PRIVATE|PUBLIC) KEY").unwrap();
+    let re_pii =
+        Regex::new(r"(?i)(email|@example|phone|address|SIN|SSN|passport|license)").unwrap();
+
+    let text_files = collect_project_text_files();
+
+    let mut total_hits = 0usize;
+    let mut locs: Vec<String> = Vec::new();
+    let mut files_with_issues = BTreeSet::new();
+
+    // Scan all source/config text files for secrets and PEMs
+    for (path, content) in &text_files {
+        let mut line_nums: Vec<usize> = Vec::new();
+        for (i0, line) in content.lines().enumerate() {
+            let i = i0 + 1;
+            if re_words.is_match(line)
+                || re_aws.is_match(line)
+                || re_gh.is_match(line)
+                || re_slack.is_match(line)
+                || re_pem.is_match(line)
+            {
+                total_hits += 1;
+                if line_nums.last().copied() != Some(i) {
+                    line_nums.push(i);
+                }
+            }
+        }
+        if !line_nums.is_empty() {
+            files_with_issues.insert(path.clone());
+            locs.push(format!("{path}:{}", join_usize(&line_nums)));
+        }
+    }
+
+    // Check presence of common leak files (treat as a finding, no line numbers)
+    for entry in WalkDir::new(".")
+        .into_iter()
+        .filter_entry(|e| {
+            let p = e.path();
+            let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            !(name == ".git" || name == "target" || name == "node_modules" || p.is_symlink())
+        })
+        .filter_map(Result::ok)
+    {
+        let p = entry.path();
+        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        let path_str = p.to_string_lossy();
+
+        let is_leak_file = name.starts_with(".env")
+            || name == ".envrc"
+            || name == "kubeconfig"
+            || name.starts_with("id_rsa")
+            || name.starts_with("id_ed25519")
+            || name.ends_with(".pem")
+            || name.ends_with(".p12")
+            || name.ends_with(".crt")
+            || name.ends_with(".key")
+            || path_str.ends_with(".kube/config")
+            || name == ".npmrc"
+            || name == ".pypirc"
+            || name == ".netrc"
+            || name == ".git-credentials"
+            || name == ".aws";
+
+        if is_leak_file {
+            files_with_issues.insert(path_str.to_string());
+            locs.push(path_str.to_string());
+            total_hits += 1;
+        }
+    }
+
+    // Scan docs/examples/tests only for PII-like terms
+    for (path, content) in &text_files {
+        let lower = path.to_lowercase();
+        if !(lower.starts_with("docs/")
+            || lower.contains("/docs/")
+            || lower.starts_with("examples/")
+            || lower.contains("/examples/")
+            || lower.starts_with("tests/")
+            || lower.contains("/tests/"))
+        {
+            continue;
+        }
+        let mut line_nums: Vec<usize> = Vec::new();
+        for (i0, line) in content.lines().enumerate() {
+            let i = i0 + 1;
+            if re_pii.is_match(line) {
+                total_hits += 1;
+                if line_nums.last().copied() != Some(i) {
+                    line_nums.push(i);
+                }
+            }
+        }
+        if !line_nums.is_empty() {
+            files_with_issues.insert(path.clone());
+            locs.push(format!("{path}:{}", join_usize(&line_nums)));
+        }
+    }
+
+    let found = !files_with_issues.is_empty();
+    let details = if found {
+        format!("{} files, {} findings", files_with_issues.len(), total_hits)
+    } else {
+        "not found".to_string()
+    };
+    (found, details, locs)
+}
+
+fn join_usize(nums: &[usize]) -> String {
+    nums.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(",")
 }
