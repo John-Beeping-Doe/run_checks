@@ -2,91 +2,106 @@
 
 ## Overview
 
-The `run_checks` project is a Rust CLI tool designed to streamline and automate common development tasks such as formatting, linting, type checking, and testing. It also provides utility functions for viewing project files and directory structures. 
+`run_checks` is a Rust CLI tool to automate common development tasks such as formatting, linting, type checking, and testing.  
+It also includes utilities for inspecting source files and directory structures.  
+
+The tool runs once and exits — no interactive menus or persistent TUI.
 
 ## Features
 
-- **Code Formatting**: Uses `rustfmt` to format all Rust files...
-- **Linting**: Runs `clippy` with strict checks to ensure code quality.
-- **Type Checking**: Validates types and syntax using `cargo check`.
-- **Testing**: Executes unit tests with `cargo test` to verify code functionality.
-- **Directory Structure Display**: Shows a tree view of the project directory up to two levels deep.
-- **Source File Viewer**: Displays the contents of all `.rs` files in the `src` directory.
-- **Interactive CLI**: User-friendly menu-driven interface for accessing features.
+- **Code Formatting**: Run `rustfmt` across the codebase.
+- **Linting**: Run `clippy` with `-D warnings` for strict linting.
+- **Type Checking**: Validate syntax and types via `cargo check`.
+- **Testing**: Run all unit tests with `cargo test`.
+- **Directory Tree Display**: Print a project tree up to a configurable depth.
+- **Source File Viewer**: Print the contents of all `.rs` files in `src`.
 
 ## Usage
 
 ### 1. Prerequisites
-Ensure you have the following installed:
 - [Rust and Cargo](https://www.rust-lang.org/tools/install)
 
 ### 2. Clone the Repository
 ```bash
 git clone https://github.com/John-Beeping-Doe/run_checks.git
 cd run_checks
+````
 
-3. Build and Run
+### 3. Build and Run
 
-Run the application directly:
+Run with `cargo run` and pass a subcommand:
 
-cargo run
+```bash
+cargo run -- <command> [options]
+```
 
-4. Interactive Menu Options
+### 4. Available Commands
 
-	•	Check and Run: Executes all checks (formatting, linting, type checking, testing) and runs the project if all checks pass.
-	•	Run Checks: Runs all predefined checks individually.
-	•	Tree: Displays the directory structure up to two levels deep.
-	•	Display All: Displays the contents of all .rs files in the src folder.
-	•	Exit: Exits the CLI tool.
+* `checks` → run `rustfmt`, `clippy`, `cargo check`, and `cargo test`. Print summary table.
+* `files` → print the contents of all `.rs` files in `src/`.
+* `tree [--depth N]` → print directory tree (default depth 2).
+* `all [--depth N]` → run all checks, then show files and tree.
 
-File Structure
+### 5. Global Options
 
+* `--clear` → clear the terminal before printing each section.
+* `-h, --help` → show help with examples.
+* `-V, --version` → show version.
+
+### Examples
+
+Run all checks:
+
+```bash
+cargo run -- checks
+```
+
+Run everything (checks + source files + directory tree, depth 3, clearing output):
+
+```bash
+cargo run -- all --depth 3 --clear
+```
+
+View project tree only:
+
+```bash
+cargo run -- tree --depth 1
+```
+
+## Example Output
+
+```
+┌─────────────────────┬───────────┬───────────────┐
+│ Tool                │ Status    │ Time Elapsed  │
+╞═════════════════════╪═══════════╪═══════════════╡
+│ rustfmt             │ Success   │ 0.113 seconds │
+│ clippy              │ Success   │ 0.238 seconds │
+│ cargo check         │ Success   │ 0.130 seconds │
+│ cargo test          │ Success   │ 0.388 seconds │
+├─────────────────────┼───────────┼───────────────┤
+│ Total time elapsed: │           │ 0.391 seconds │
+└─────────────────────┴───────────┴───────────────┘
+```
+
+## File Structure
+
+```
 .
-├── Cargo.toml      # Project metadata and dependencies
-├── src
-│   ├── display_all.rs # Handles displaying Rust source file contents
-│   ├── main.rs        # Main entry point for the application
-│   ├── run_checks.rs  # Implements formatting, linting, and testing routines
-│   ├── tree.rs        # Displays the directory structure
+├── Cargo.toml
+├── README.md
+└── src
+    ├── display_all.rs   # Print Rust source files
+    ├── main.rs          # CLI entrypoint
+    ├── run_checks.rs    # Formatting, linting, type checking, tests
+    └── tree.rs          # Directory tree printer
+```
 
-Example Output
+## Contributing
 
-Running cargo run:
+Contributions are welcome. Fork the repository, make changes, and open a PR.
 
-=== Rust CLI Menu ===
-1. Check and Run
-2. Run Checks
-3. Tree
-4. Display All
-5. Exit
-Choose an option:
+## License
 
-Sample Tree Output:
-
-Directory structure (up to 2 levels):
-[DIR] ./src
-  [FILE] ./src/main.rs
-  [FILE] ./src/display_all.rs
-  [FILE] ./src/run_checks.rs
-  [FILE] ./src/tree.rs
-
-Displaying Rust File Contents:
-
-========================================
-src/main.rs
-========================================
-<Contents of main.rs>
-
-Contributing
-
-Contributions are welcome! Please fork the repository, make changes, and submit a pull request.
-
-License
-
-This project is licensed under the MIT License.
-
-Acknowledgments
-
-Special thanks to the maintainers of Rust and its excellent ecosystem of libraries.
+MIT License
 
 

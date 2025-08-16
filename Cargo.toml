@@ -1,17 +1,16 @@
+# Package run_checks
+# File: Cargo.toml
 [package]
 name = "run_checks"
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/John-Beeping-Doe/run_checks"
 
 [dependencies]
-cargo-deny = "0.16.1"       # For license checks and vulnerabilities
-cargo-outdated = "0.15.0"   # For identifying outdated dependencies
-cargo-tarpaulin = { version = "0.31.2", default-features = false } # For measuring test coverage
-comfy-table = "7.1.1"       # For table formatting
-dialoguer = "0.11.0"        # For interactive CLI menus
-futures = "0.3.31"          # For asynchronous futures
-owo-colors = "4.1.0"        # For colored terminal output
-tokio = { version = "1.41.1", features = ["full", "process"] } # Async runtime and process handling
-
-[dev-dependencies]
-cargo-audit = "0.21.0"      # For auditing dependencies
+clap = { version = "4.5.9", features = ["derive"] }
+comfy-table = "7.1.1"
+futures = "0.3.31"
+owo-colors = "4.1.0"
+tokio = { version = "1.41.1", features = ["full", "process"] }
+walkdir = "2.5.0"
+get_if_addrs = "0.5.3"

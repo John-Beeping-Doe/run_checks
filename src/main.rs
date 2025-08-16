@@ -1,87 +1,110 @@
-// src/main.rs
+// Package run_checks
+// File: src/main.rs
 
-use crate::display_all::display_all;
-use crate::run_checks::{check_and_run, run_checks};
-use crate::tree::display_tree;
-
-use dialoguer::{theme::ColorfulTheme, Select};
+use clap::{Parser, Subcommand};
 use owo_colors::OwoColorize;
-use std::process::{exit, Command};
 
 mod display_all;
 mod run_checks;
 mod tree;
 
-/// Main entry point of the program, displaying the CLI menu in a loop.
+/// CLI for one-shot checks and project introspection.
+#[derive(Parser)]
+#[command(
+    name = "run_checks",
+    version,
+    about = "Run checks and helpers, then exit.",
+    after_help = "\
+Examples:
+  cargo run -- checks
+      Run rustfmt, clippy, cargo check, and cargo test. Print a summary table.
+
+  cargo run -- all --depth 3 --clear
+      Run all checks, then display all source files and a directory tree
+      up to depth 3, clearing the screen before each section.
+
+  ./run_checks checks
+      Use the compiled binary in production or CI to run the checks and print the tables.
+
+  ./run_checks all --depth 3 --clear
+      Run checks, show file contents and a directory tree using the installed binary."
+)]
+struct Cli {
+    /// Optional global clear before printing each subcommand output
+    #[arg(long)]
+    clear: bool,
+
+    #[command(subcommand)]
+    cmd: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Run rustfmt, clippy, check, test. Print a summary table.
+    Checks,
+    /// Print a directory tree. Default depth=2.
+    Tree {
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+    },
+    /// Print all .rs files under src.
+    Files,
+    /// Run `checks`, then `files`, then `tree`.
+    All {
+        #[arg(long, default_value_t = 2)]
+        depth: usize,
+    },
+}
+
 #[tokio::main]
 async fn main() {
-    loop {
-        clear_terminal();
+    let cli = Cli::parse();
 
-        println!("{}", "=== Rust CLI Menu ===".cyan());
+    let mut exit_code = 0usize;
 
-        let options = &["Check and Run", "Run Checks", "Tree", "Display All", "Exit"];
-
-        let selection = Select::with_theme(&ColorfulTheme::default())
-            .with_prompt("Choose an option")
-            .items(options)
-            .default(0)
-            .interact()
-            .unwrap();
-
-        match selection {
-            0 => check_and_run().await,
-            1 => {
-                if !run_checks().await {
-                    eprintln!("{}", "Run Checks completed with failures.".red());
-                }
+    match cli.cmd {
+        Command::Checks => {
+            maybe_clear(cli.clear);
+            let ok = run_checks::run_checks().await;
+            if !ok {
+                eprintln!("{}", "Some checks failed.".red());
+                exit_code = 1;
             }
-            2 => display_tree(),
-            3 => display_all(),
-            4 => {
-                println!("{}", "Exiting...".green());
-                exit(0);
-            }
-            _ => unreachable!(),
         }
-
-        println!("\nPress Enter to return to the menu...");
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).unwrap();
+        Command::Tree { depth } => {
+            maybe_clear(cli.clear);
+            tree::display_tree(depth);
+        }
+        Command::Files => {
+            maybe_clear(cli.clear);
+            display_all::display_all();
+        }
+        Command::All { depth } => {
+            maybe_clear(cli.clear);
+            let ok = run_checks::run_checks().await;
+            if !ok {
+                eprintln!("{}", "Checks failed. Skipping files/tree.".red());
+                exit_code = 1;
+            } else {
+                display_all::display_all();
+                tree::display_tree(depth);
+            }
+        }
     }
+
+    std::process::exit(exit_code as i32);
 }
 
-/// Clears the terminal screen for a clean UI.
-fn clear_terminal() {
-    if cfg!(target_os = "windows") {
-        Command::new("cmd")
-            .args(["/C", "cls"])
-            .status()
-            .expect("Failed to clear terminal");
-    } else {
-        Command::new("clear")
-            .status()
-            .expect("Failed to clear terminal");
+fn maybe_clear(clear: bool) {
+    if !clear {
+        return;
     }
-}
-
-/// Executes a command with custom environment variables.
-///
-/// # Parameters
-/// - `command`: The command to run.
-/// - `args`: Arguments to pass to the command.
-/// - `env_vars`: Environment variables as a slice of key-value pairs.
-///
-/// # Returns
-/// - `true` if the command succeeds, `false` otherwise.
-fn run_command_with_env(command: &str, args: &[&str], env_vars: &[(&str, &str)]) -> bool {
-    let mut cmd = Command::new(command);
-    cmd.args(args); // Add command-line arguments
-    for &(key, value) in env_vars {
-        cmd.env(key, value); // Set environment variables for the command
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("cmd").args(["/C", "cls"]).status();
     }
-    match cmd.status() {
-        Ok(status) => status.success(), // Return true if the command exits successfully
-        Err(_) => false,                // Return false on error
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("clear").status();
     }
 }

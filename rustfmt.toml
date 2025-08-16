@@ -1,0 +1,10 @@
+# File: rustfmt.toml
+max_width = 100
+tab_spaces = 4
+use_small_heuristics = "Max"
+
+# Imports
+reorder_imports = true
+
+# Endings
+newline_style = "Unix"

@@ -1,1 +1,8 @@
-/target
+target/
+*.csv
+Cargo.lock
+run_checks.sh
+run_checks_only.sh
+*.db
+*.db-shm
+*.db-wal
