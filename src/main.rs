@@ -6,6 +6,7 @@ use owo_colors::OwoColorize;
 use std::io::Write as IoWrite;
 use std::process::{Command, Stdio};
 
+mod defaults;
 mod display_all;
 mod run_checks;
 mod tree;
@@ -20,16 +21,23 @@ mod tree;
 Examples:
   cargo run -- checks
       Run rustfmt, clippy, cargo check, and cargo test. Print a summary table.
+      The Security/Privacy table skips Extra scans.
+
+  cargo run -- checks-extras
+      Same as 'checks' but runs the Extra scans row.
+
+  cargo run -- create-defaults
+      Create .gitignore, rustfmt.toml, run_checks.sh, LICENSE if missing.
 
   cargo run -- all --depth 3 --clear
-      Run all checks, then display all source files and a directory tree
+      Run checks (skip extras), then display all source files and a directory tree
       up to depth 3, clearing the screen before each section.
 
-  ./run_checks checks
-      Use the compiled binary in production or CI to run the checks and print the tables.
+  ./run_checks checks-extras
+      Use the compiled binary and include Extra scans.
 
   ./run_checks all --depth 3 --clear
-      Run checks, show file contents and a directory tree using the installed binary."
+      Run checks (skip extras), show file contents and a directory tree using the installed binary."
 )]
 struct Cli {
     /// Optional global clear before printing each subcommand output
@@ -42,8 +50,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum CommandKind {
-    /// Run rustfmt, clippy, check, test. Print a summary table.
+    /// Run rustfmt, clippy, check, test. Prints summary tables. Extra scans are skipped.
     Checks,
+    /// Same as `checks` but runs the Extra scans row.
+    #[command(name = "checks-extras")]
+    ChecksExtras,
+    /// Create default project files if absent (.gitignore, rustfmt.toml, run_checks.sh, LICENSE).
+    #[command(name = "create-defaults")]
+    CreateDefaults,
     /// Print a directory tree. Default depth=2.
     Tree {
         #[arg(long, default_value_t = 2)]
@@ -51,7 +65,7 @@ enum CommandKind {
     },
     /// Print all .rs files under src and copy to clipboard.
     Files,
-    /// Run `checks`, then `files` (copy to clipboard), then `tree` (always runs).
+    /// Run `checks` (skip extras), then `files`, then `tree`.
     All {
         #[arg(long, default_value_t = 2)]
         depth: usize,
@@ -61,17 +75,28 @@ enum CommandKind {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-
     let mut exit_code = 0usize;
 
     match cli.cmd {
         CommandKind::Checks => {
             maybe_clear(cli.clear);
-            let ok = run_checks::run_checks().await;
+            let ok = run_checks::run_checks(false).await;
             if !ok {
                 eprintln!("{}", "Some checks failed.".red());
                 exit_code = 1;
             }
+        }
+        CommandKind::ChecksExtras => {
+            maybe_clear(cli.clear);
+            let ok = run_checks::run_checks(true).await;
+            if !ok {
+                eprintln!("{}", "Some checks failed.".red());
+                exit_code = 1;
+            }
+        }
+        CommandKind::CreateDefaults => {
+            maybe_clear(cli.clear);
+            defaults::ensure_defaults();
         }
         CommandKind::Tree { depth } => {
             maybe_clear(cli.clear);
@@ -90,7 +115,7 @@ async fn main() {
         }
         CommandKind::All { depth } => {
             maybe_clear(cli.clear);
-            let ok = run_checks::run_checks().await;
+            let ok = run_checks::run_checks(false).await;
             if !ok {
                 eprintln!("{}", "[all] Checks failed, continuing with files/tree.".yellow());
                 exit_code = 1;

@@ -10,8 +10,9 @@ use tokio::process::Command;
 use walkdir::WalkDir;
 
 /// Run rustfmt, clippy, cargo check, cargo test, then privacy/security scans.
+/// `run_extras` controls whether the Extra scans row actually runs.
 /// Returns true if all tool checks succeeded.
-pub async fn run_checks() -> bool {
+pub async fn run_checks(run_extras: bool) -> bool {
     async fn run_tool(name: &str, cmd: &[&str]) -> (String, bool, String) {
         let start = Instant::now();
         let ok = Command::new(cmd[0])
@@ -67,14 +68,15 @@ pub async fn run_checks() -> bool {
     ]));
     println!("\n{table}");
 
-    let sec_table = build_privacy_security_table();
+    let sec_table = build_privacy_security_table(run_extras);
     println!("\n{sec_table}");
 
     all_ok
 }
 
 /// Build the privacy/security scan table using a single-pass multi-pattern search.
-fn build_privacy_security_table() -> Table {
+/// If `run_extras` is false, the Extra scans row is marked as skipped with guidance.
+fn build_privacy_security_table(run_extras: bool) -> Table {
     let usernames = gather_usernames();
     let hostnames = gather_hostnames();
     let ips = gather_ips();
@@ -113,6 +115,38 @@ fn build_privacy_security_table() -> Table {
             Cell::new("0"),
             Cell::new(""),
         ]);
+        // Even in this case, show Extra scans row according to run_extras.
+        if run_extras {
+            let (extra_found, extra_details, extra_locs) = run_extra_scans();
+            let status = if extra_found {
+                Cell::new("Found").add_attribute(Attribute::Bold).fg(Color::Red)
+            } else {
+                Cell::new("Not found").add_attribute(Attribute::Bold).fg(Color::Green)
+            };
+            let locs = if extra_locs.is_empty() {
+                String::new()
+            } else if extra_locs.len() <= 5 {
+                extra_locs.join(" | ")
+            } else {
+                let shown = extra_locs[..5].join(" | ");
+                format!("{shown} | +{} more files", extra_locs.len() - 5)
+            };
+            t.add_row(vec![
+                Cell::new("Extra scans"),
+                Cell::new("secrets, PEM, leak-files, docs/examples/tests"),
+                status,
+                Cell::new(extra_details),
+                Cell::new(locs),
+            ]);
+        } else {
+            t.add_row(vec![
+                Cell::new("Extra scans"),
+                Cell::new("secrets, PEM, leak-files, docs/examples/tests"),
+                Cell::new("Skipped").add_attribute(Attribute::Bold).fg(Color::Yellow),
+                Cell::new("Run with: `run_checks checks-extras`"),
+                Cell::new(""),
+            ]);
+        }
         return t;
     }
 
@@ -201,28 +235,38 @@ fn build_privacy_security_table() -> Table {
         ]);
     }
 
-    // Final combined row for extra scans (secrets, PEMs, leak-files, docs/examples/tests PII).
-    let (extra_found, extra_details, extra_locs) = run_extra_scans();
-    let status = if extra_found {
-        Cell::new("Found").add_attribute(Attribute::Bold).fg(Color::Red)
+    // Extra scans row.
+    if run_extras {
+        let (extra_found, extra_details, extra_locs) = run_extra_scans();
+        let status = if extra_found {
+            Cell::new("Found").add_attribute(Attribute::Bold).fg(Color::Red)
+        } else {
+            Cell::new("Not found").add_attribute(Attribute::Bold).fg(Color::Green)
+        };
+        let locs = if extra_locs.is_empty() {
+            String::new()
+        } else if extra_locs.len() <= 5 {
+            extra_locs.join(" | ")
+        } else {
+            let shown = extra_locs[..5].join(" | ");
+            format!("{shown} | +{} more files", extra_locs.len() - 5)
+        };
+        t.add_row(vec![
+            Cell::new("Extra scans"),
+            Cell::new("secrets, PEM, leak-files, docs/examples/tests"),
+            status,
+            Cell::new(extra_details),
+            Cell::new(locs),
+        ]);
     } else {
-        Cell::new("Not found").add_attribute(Attribute::Bold).fg(Color::Green)
-    };
-    let locs = if extra_locs.is_empty() {
-        String::new()
-    } else if extra_locs.len() <= 5 {
-        extra_locs.join(" | ")
-    } else {
-        let shown = extra_locs[..5].join(" | ");
-        format!("{shown} | +{} more files", extra_locs.len() - 5)
-    };
-    t.add_row(vec![
-        Cell::new("Extra scans"),
-        Cell::new("secrets, PEM, leak-files, docs/examples/tests"),
-        status,
-        Cell::new(extra_details),
-        Cell::new(locs),
-    ]);
+        t.add_row(vec![
+            Cell::new("Extra scans"),
+            Cell::new("secrets, PEM, leak-files, docs/examples/tests"),
+            Cell::new("Skipped").add_attribute(Attribute::Bold).fg(Color::Yellow),
+            Cell::new("Run with: `run_checks checks-extras`"),
+            Cell::new(""),
+        ]);
+    }
 
     t
 }
