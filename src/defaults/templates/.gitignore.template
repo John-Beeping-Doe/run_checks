@@ -1,3 +1,5 @@
+// Snippet
+// File: src/defaults/.gitignore.template
 # File: .gitignore
 /target
 **/*.rs.bk

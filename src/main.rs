@@ -1,15 +1,13 @@
-// Package run_checks
+// Snippet
 // File: src/main.rs
 
 use clap::{Parser, Subcommand};
-use owo_colors::OwoColorize;
-use std::io::Write as IoWrite;
-use std::process::{Command, Stdio};
 
-mod defaults;
+mod defaults; // now a module directory: src/defaults/mod.rs + templates.rs
 mod display_all;
-mod run_checks;
+mod run_checks; // orchestrates core tools + privacy table
 mod tree;
+mod util; // clipboard, clear screen, ANSI stripping
 
 /// CLI for one-shot checks and project introspection.
 #[derive(Parser)]
@@ -20,27 +18,13 @@ mod tree;
     after_help = "\
 Examples:
   cargo run -- checks
-      Run rustfmt, clippy, cargo check, and cargo test. Print a summary table.
-      The Security/Privacy table skips Extra scans.
-
-  cargo run -- checks-extras
-      Same as 'checks' but runs the Extra scans row.
-
+  cargo run -- \"Checks plus Extras\"
   cargo run -- create-defaults
-      Create .gitignore, rustfmt.toml, run_checks.sh, LICENSE if missing.
-
   cargo run -- all --depth 3 --clear
-      Run checks (skip extras), then display all source files and a directory tree
-      up to depth 3, clearing the screen before each section.
-
-  ./run_checks checks-extras
-      Use the compiled binary and include Extra scans.
-
-  ./run_checks all --depth 3 --clear
-      Run checks (skip extras), show file contents and a directory tree using the installed binary."
+  ./run_checks all --depth 3 --clear"
 )]
 struct Cli {
-    /// Optional global clear before printing each subcommand output
+    /// Clear the screen before each subcommand output
     #[arg(long)]
     clear: bool,
 
@@ -50,22 +34,30 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum CommandKind {
-    /// Run rustfmt, clippy, check, test. Prints summary tables. Extra scans are skipped.
+    /// Run rustfmt, clippy, check, test. Prints tables. Extra scans are skipped. Copies to clipboard.
     Checks,
-    /// Same as `checks` but runs the Extra scans row.
-    #[command(name = "checks-extras")]
+
+    /// Same as `checks` but runs the Extra scans row. Copies to clipboard.
+    #[command(name = "checks-extras", visible_alias = "Checks plus Extras")]
     ChecksExtras,
-    /// Create default project files if absent (.gitignore, rustfmt.toml, run_checks.sh, LICENSE).
-    #[command(name = "create-defaults")]
+
+    /// Create default project files/folders if absent. Copies to clipboard.
+    #[command(
+        name = "create-defaults",
+        visible_aliases = ["Create Defaults?", "create-defaults?"]
+    )]
     CreateDefaults,
-    /// Print a directory tree. Default depth=2.
+
+    /// Print a directory tree. Default depth=2. Copies to clipboard.
     Tree {
         #[arg(long, default_value_t = 2)]
         depth: usize,
     },
-    /// Print all .rs files under src and copy to clipboard.
+
+    /// Print all .rs/.md/.sh/.toml files. Copies to clipboard.
     Files,
-    /// Run `checks` (skip extras), then `files`, then `tree`.
+
+    /// Run `checks` (skip extras), then `files`, then `tree`. One clipboard copy with all sections.
     All {
         #[arg(long, default_value_t = 2)]
         depth: usize,
@@ -79,149 +71,77 @@ async fn main() {
 
     match cli.cmd {
         CommandKind::Checks => {
-            maybe_clear(cli.clear);
-            let ok = run_checks::run_checks(false).await;
+            util::maybe_clear(cli.clear);
+            let (ok, blob) = run_checks::run_checks(false).await;
+            println!("{blob}");
+            util::copy_report("checks", &blob);
             if !ok {
-                eprintln!("{}", "Some checks failed.".red());
+                eprintln!("Some checks failed.");
                 exit_code = 1;
             }
         }
         CommandKind::ChecksExtras => {
-            maybe_clear(cli.clear);
-            let ok = run_checks::run_checks(true).await;
+            util::maybe_clear(cli.clear);
+            let (ok, blob) = run_checks::run_checks(true).await;
+            println!("{blob}");
+            util::copy_report("checks-extras", &blob);
             if !ok {
-                eprintln!("{}", "Some checks failed.".red());
+                eprintln!("Some checks failed.");
                 exit_code = 1;
             }
         }
         CommandKind::CreateDefaults => {
-            maybe_clear(cli.clear);
-            defaults::ensure_defaults();
+            util::maybe_clear(cli.clear);
+            let out = defaults::ensure_defaults();
+            println!("{out}");
+            util::copy_report("create-defaults", &out);
         }
         CommandKind::Tree { depth } => {
-            maybe_clear(cli.clear);
-            tree::display_tree(depth);
+            util::maybe_clear(cli.clear);
+            let blob = tree::collect_tree(depth);
+            println!("{blob}");
+            util::copy_report("tree", &blob);
         }
         CommandKind::Files => {
-            maybe_clear(cli.clear);
+            util::maybe_clear(cli.clear);
             let blob = display_all::collect_all_rs();
             print!("{blob}");
-            let blob_clean = strip_ansi_sgr(&blob);
-            if copy_to_clipboard(&blob_clean) {
-                println!("{}", "[files] Copied output to clipboard.".green());
-            } else {
-                println!("{}", "[files] Clipboard copy not available.".yellow());
-            }
+            util::copy_report("files", &blob);
         }
         CommandKind::All { depth } => {
-            maybe_clear(cli.clear);
-            let ok = run_checks::run_checks(false).await;
+            util::maybe_clear(cli.clear);
+
+            // 1) checks
+            let (ok, checks_blob) = run_checks::run_checks(false).await;
+            println!("{checks_blob}");
             if !ok {
-                eprintln!("{}", "[all] Checks failed, continuing with files/tree.".yellow());
+                eprintln!("[all] Checks failed, continuing with files/tree.");
                 exit_code = 1;
             }
-            let blob = display_all::collect_all_rs();
-            print!("{blob}");
-            let blob_clean = strip_ansi_sgr(&blob);
-            if copy_to_clipboard(&blob_clean) {
-                println!("{}", "[all] Copied files output to clipboard.".green());
-            } else {
-                println!("{}", "[all] Clipboard copy not available.".yellow());
+
+            // 2) files
+            let files_blob = display_all::collect_all_rs();
+            print!("{files_blob}");
+
+            // 3) tree
+            let tree_blob = tree::collect_tree(depth);
+            println!("{tree_blob}");
+
+            // One combined clipboard copy
+            let mut all_blob = String::new();
+            all_blob.push_str(&checks_blob);
+            if !all_blob.ends_with('\n') {
+                all_blob.push('\n');
             }
-            tree::display_tree(depth);
+            all_blob.push_str(&files_blob);
+            if !all_blob.ends_with('\n') {
+                all_blob.push('\n');
+            }
+            all_blob.push_str(&tree_blob);
+
+            util::copy_report("all", &all_blob);
         }
     }
 
     std::process::exit(exit_code as i32);
-}
-
-fn maybe_clear(clear: bool) {
-    if !clear {
-        return;
-    }
-    #[cfg(windows)]
-    {
-        let _ = std::process::Command::new("cmd").args(["/C", "cls"]).status();
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = std::process::Command::new("clear").status();
-    }
-}
-
-/// Cross-platform clipboard copy using system tools.
-/// macOS: pbcopy
-/// Windows: clip
-/// Linux: wl-copy, else xclip, else xsel.
-fn copy_to_clipboard(text: &str) -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        return pipe_to("pbcopy", text);
-    }
-    #[cfg(target_os = "windows")]
-    {
-        return pipe_to("clip", text);
-    }
-    #[cfg(target_os = "linux")]
-    {
-        if pipe_to("wl-copy", text) {
-            return true;
-        }
-        if Command::new("xclip").arg("-version").stdout(Stdio::null()).status().is_ok() {
-            if let Ok(mut child) = Command::new("xclip")
-                .args(["-selection", "clipboard"])
-                .stdin(Stdio::piped())
-                .spawn()
-            {
-                if let Some(stdin) = child.stdin.as_mut() {
-                    let _ = stdin.write_all(text.as_bytes());
-                }
-                return child.wait().map(|s| s.success()).unwrap_or(false);
-            }
-        }
-        return pipe_to_with_args("xsel", &["--clipboard", "--input"], text);
-    }
-    #[allow(unreachable_code)]
-    false
-}
-
-fn pipe_to(cmd: &str, text: &str) -> bool {
-    pipe_to_with_args(cmd, &[], text)
-}
-
-fn pipe_to_with_args(cmd: &str, args: &[&str], text: &str) -> bool {
-    let mut child = match Command::new(cmd).args(args).stdin(Stdio::piped()).spawn() {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    if let Some(stdin) = child.stdin.as_mut() {
-        if stdin.write_all(text.as_bytes()).is_err() {
-            return false;
-        }
-    }
-    child.wait().map(|s| s.success()).unwrap_or(false)
-}
-
-/// Remove ANSI SGR escape sequences.
-fn strip_ansi_sgr(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = String::with_capacity(s.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
-            i += 2;
-            while i < bytes.len() {
-                let b = bytes[i];
-                if (b'@'..=b'~').contains(&b) {
-                    i += 1;
-                    break;
-                }
-                i += 1;
-            }
-        } else {
-            out.push(bytes[i] as char);
-            i += 1;
-        }
-    }
-    out
 }
